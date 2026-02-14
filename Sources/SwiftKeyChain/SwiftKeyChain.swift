@@ -73,6 +73,11 @@ public struct SwiftKeyChainConfiguration: Sendable {
 }
 
 public final class SwiftKeyChain {
+    private static let syncFallbackStatuses: Set<OSStatus> = [
+        errSecMissingEntitlement,
+        errSecNotAvailable,
+    ]
+
     public static var defaultService: String {
         Bundle.main.bundleIdentifier ?? "SwiftKeyChain.DefaultService"
     }
@@ -159,17 +164,50 @@ public final class SwiftKeyChain {
         try getKey(key, as: Int.self)
     }
 
+    public func getInt(_ key: String, default defaultValue: Int) throws -> Int {
+        try getKey(key, default: defaultValue, as: Int.self)
+    }
+
     public func getDouble(_ key: String) throws -> Double? {
         try getKey(key, as: Double.self)
+    }
+
+    public func getDouble(_ key: String, default defaultValue: Double) throws -> Double {
+        try getKey(key, default: defaultValue, as: Double.self)
     }
 
     public func getBool(_ key: String) throws -> Bool? {
         try getKey(key, as: Bool.self)
     }
 
+    public func getBool(_ key: String, default defaultValue: Bool) throws -> Bool {
+        try getKey(key, default: defaultValue, as: Bool.self)
+    }
+
+    public var isSynchronizableRequested: Bool {
+        configuration.synchronizable
+    }
+
+    public func canUseSynchronizableStorage() -> Bool {
+        guard configuration.synchronizable else {
+            return false
+        }
+
+        let probeKey = "__swiftkeychain_sync_probe__"
+
+        do {
+            _ = try readRawData(forKey: probeKey, synchronizable: true)
+            return true
+        } catch let error as SwiftKeyChainError {
+            return !shouldFallbackToLocalStorage(error)
+        } catch {
+            return false
+        }
+    }
+
     public func getData(forKey key: String) throws -> Data? {
         let validatedKey = try validateKey(key)
-        return try readRawData(forKey: validatedKey)
+        return try readDataWithFallback(forKey: validatedKey)
     }
 
     public func containsKey(_ key: String) throws -> Bool {
@@ -184,17 +222,7 @@ public final class SwiftKeyChain {
     @discardableResult
     public func removeKey(_ key: String) throws -> Bool {
         let validatedKey = try validateKey(key)
-        let query = keyQuery(for: validatedKey)
-        let status = SecItemDelete(query as CFDictionary)
-
-        switch status {
-        case errSecSuccess:
-            return true
-        case errSecItemNotFound:
-            return false
-        default:
-            throw statusToError(status)
-        }
+        return try removeDataWithFallback(forKey: validatedKey)
     }
 
     public func removeAllKeys() throws {
@@ -206,7 +234,7 @@ public final class SwiftKeyChain {
 
     public func removeAllAvailableKeys() throws {
         for isSynchronizable in [false, true] {
-            var query = serviceQuery()
+            var query = serviceQuery(synchronizable: isSynchronizable)
             query[kSecAttrSynchronizable as String] = isSynchronizable ? kCFBooleanTrue as Any : kCFBooleanFalse as Any
 
             let status = SecItemDelete(query as CFDictionary)
@@ -220,7 +248,20 @@ public final class SwiftKeyChain {
     }
 
     public func allKeys() throws -> [String] {
-        try keysForQuery()
+        if !configuration.synchronizable {
+            return try keysForQuery(synchronizable: false)
+        }
+
+        var combined = Set<String>()
+
+        do {
+            combined.formUnion(try keysForQuery(synchronizable: true))
+        } catch let error as SwiftKeyChainError where shouldFallbackToLocalStorage(error) {
+            // Sync is not available; continue with local keychain only.
+        }
+
+        combined.formUnion(try keysForQuery(synchronizable: false))
+        return Array(combined).sorted()
     }
 
     private enum WriteMode {
@@ -240,21 +281,42 @@ public final class SwiftKeyChain {
 
     private func setRawData(_ data: Data, forKey key: String, mode: WriteMode) throws {
         let validatedKey = try validateKey(key)
+        try writeDataWithFallback(data, forKey: validatedKey, mode: mode)
+    }
 
-        switch mode {
-        case .upsert:
-            do {
-                try addRawData(data, forKey: validatedKey)
-            } catch SwiftKeyChainError.duplicateKey {
-                try updateRawData(data, forKey: validatedKey)
-            }
-        case .updateOnly:
-            try updateRawData(data, forKey: validatedKey)
+    private func writeDataWithFallback(_ data: Data, forKey key: String, mode: WriteMode) throws {
+        if !configuration.synchronizable {
+            try writeRawData(data, forKey: key, mode: mode, synchronizable: false)
+            return
+        }
+
+        do {
+            try writeRawData(data, forKey: key, mode: mode, synchronizable: true)
+        } catch let error as SwiftKeyChainError where shouldFallbackToLocalStorage(error) {
+            try writeRawData(data, forKey: key, mode: mode, synchronizable: false)
         }
     }
 
-    private func addRawData(_ data: Data, forKey key: String) throws {
-        var query = keyQuery(for: key)
+    private func writeRawData(
+        _ data: Data,
+        forKey key: String,
+        mode: WriteMode,
+        synchronizable: Bool
+    ) throws {
+        switch mode {
+        case .upsert:
+            do {
+                try addRawData(data, forKey: key, synchronizable: synchronizable)
+            } catch SwiftKeyChainError.duplicateKey {
+                try updateRawData(data, forKey: key, synchronizable: synchronizable)
+            }
+        case .updateOnly:
+            try updateRawData(data, forKey: key, synchronizable: synchronizable)
+        }
+    }
+
+    private func addRawData(_ data: Data, forKey key: String, synchronizable: Bool) throws {
+        var query = keyQuery(for: key, synchronizable: synchronizable)
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = configuration.accessibility.secValue
 
@@ -264,8 +326,8 @@ public final class SwiftKeyChain {
         }
     }
 
-    private func updateRawData(_ data: Data, forKey key: String) throws {
-        let searchQuery = keyQuery(for: key)
+    private func updateRawData(_ data: Data, forKey key: String, synchronizable: Bool) throws {
+        let searchQuery = keyQuery(for: key, synchronizable: synchronizable)
         let attributesToUpdate: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: configuration.accessibility.secValue,
@@ -280,8 +342,24 @@ public final class SwiftKeyChain {
         }
     }
 
-    private func readRawData(forKey key: String) throws -> Data? {
-        var query = keyQuery(for: key)
+    private func readDataWithFallback(forKey key: String) throws -> Data? {
+        if !configuration.synchronizable {
+            return try readRawData(forKey: key, synchronizable: false)
+        }
+
+        do {
+            if let syncData = try readRawData(forKey: key, synchronizable: true) {
+                return syncData
+            }
+        } catch let error as SwiftKeyChainError where !shouldFallbackToLocalStorage(error) {
+            throw error
+        }
+
+        return try readRawData(forKey: key, synchronizable: false)
+    }
+
+    private func readRawData(forKey key: String, synchronizable: Bool) throws -> Data? {
+        var query = keyQuery(for: key, synchronizable: synchronizable)
         query[kSecReturnData as String] = kCFBooleanTrue
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -296,6 +374,37 @@ public final class SwiftKeyChain {
             return data
         case errSecItemNotFound:
             return nil
+        default:
+            throw statusToError(status)
+        }
+    }
+
+    private func removeDataWithFallback(forKey key: String) throws -> Bool {
+        if !configuration.synchronizable {
+            return try removeRawData(forKey: key, synchronizable: false)
+        }
+
+        var didDelete = false
+
+        do {
+            didDelete = try removeRawData(forKey: key, synchronizable: true) || didDelete
+        } catch let error as SwiftKeyChainError where !shouldFallbackToLocalStorage(error) {
+            throw error
+        }
+
+        didDelete = try removeRawData(forKey: key, synchronizable: false) || didDelete
+        return didDelete
+    }
+
+    private func removeRawData(forKey key: String, synchronizable: Bool) throws -> Bool {
+        let query = keyQuery(for: key, synchronizable: synchronizable)
+        let status = SecItemDelete(query as CFDictionary)
+
+        switch status {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
+            return false
         default:
             throw statusToError(status)
         }
@@ -325,20 +434,20 @@ public final class SwiftKeyChain {
         return trimmed
     }
 
-    private func keyQuery(for key: String) -> [String: Any] {
-        var query = serviceQuery()
+    private func keyQuery(for key: String, synchronizable: Bool) -> [String: Any] {
+        var query = serviceQuery(synchronizable: synchronizable)
         query[kSecAttrAccount as String] = key
         return query
     }
 
-    private func serviceQuery() -> [String: Any] {
+    private func serviceQuery(synchronizable: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: configuration.service,
         ]
 
         query[kSecAttrSynchronizable as String] =
-            configuration.synchronizable ? kCFBooleanTrue as Any : kCFBooleanFalse as Any
+            synchronizable ? kCFBooleanTrue as Any : kCFBooleanFalse as Any
 
         if let accessGroup = configuration.accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
@@ -347,8 +456,8 @@ public final class SwiftKeyChain {
         return query
     }
 
-    private func keysForQuery() throws -> [String] {
-        var query = serviceQuery()
+    private func keysForQuery(synchronizable: Bool) throws -> [String] {
+        var query = serviceQuery(synchronizable: synchronizable)
         query[kSecReturnAttributes as String] = kCFBooleanTrue
         query[kSecMatchLimit as String] = kSecMatchLimitAll
 
@@ -371,6 +480,13 @@ public final class SwiftKeyChain {
         }
 
         throw SwiftKeyChainError.unexpectedData
+    }
+
+    private func shouldFallbackToLocalStorage(_ error: SwiftKeyChainError) -> Bool {
+        guard case let .unhandledStatus(status) = error else {
+            return false
+        }
+        return Self.syncFallbackStatuses.contains(status)
     }
 
     private func statusToError(_ status: OSStatus) -> SwiftKeyChainError {

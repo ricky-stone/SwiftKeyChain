@@ -28,6 +28,9 @@ struct SwiftKeyChainTests {
         #expect(try kc.getInt("age") == 29)
         #expect(try kc.getBool("isPro") == true)
         #expect(try kc.containsKey("username") == true)
+        #expect(try kc.getInt("missing-int", default: 0) == 0)
+        #expect(try kc.getDouble("missing-double", default: 2.5) == 2.5)
+        #expect(try kc.getBool("missing-bool", default: false) == false)
     }
 
     @Test("Stores and reads Codable models")
@@ -39,6 +42,22 @@ struct SwiftKeyChainTests {
         try kc.AddKey("user", user)
 
         let savedUser = try kc.getModel("user", as: User.self)
+        #expect(savedUser == user)
+    }
+
+    @Test("Supports type inference when reading values")
+    func supportsTypeInference() throws {
+        let kc = makeKeychain()
+        defer { try? kc.removeAllKeys() }
+
+        let user = User(name: "Ricky", age: 29)
+        try kc.AddKey("count", 7)
+        try kc.AddKey("user", user)
+
+        let count: Int? = try kc.getKey("count")
+        let savedUser: User? = try kc.getKey("user")
+
+        #expect(count == 7)
         #expect(savedUser == user)
     }
 
@@ -106,5 +125,16 @@ struct SwiftKeyChainTests {
 
         let username = try kc.getKey("username", default: "Guest")
         #expect(username == "Guest")
+    }
+
+    @Test("Sync check is false when sync is not requested")
+    func syncCheckIsFalseWhenSyncDisabled() {
+        let kc = SwiftKeyChain(
+            service: "SwiftKeyChain.Tests.\(UUID().uuidString)",
+            synchronizable: false
+        )
+
+        #expect(kc.isSynchronizableRequested == false)
+        #expect(kc.canUseSynchronizableStorage() == false)
     }
 }
