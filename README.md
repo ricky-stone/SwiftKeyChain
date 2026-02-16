@@ -1,16 +1,16 @@
-# SwiftKeyChain
+# SwiftKey
 
-[![Release](https://img.shields.io/github/v/release/ricky-stone/SwiftKeyChain?include_prereleases&label=release)](https://github.com/ricky-stone/SwiftKeyChain/releases)
-[![CI](https://github.com/ricky-stone/SwiftKeyChain/actions/workflows/ci.yml/badge.svg)](https://github.com/ricky-stone/SwiftKeyChain/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ricky-stone/SwiftKey?include_prereleases&label=release)](https://github.com/ricky-stone/SwiftKey/releases)
+[![CI](https://github.com/ricky-stone/SwiftKey/actions/workflows/ci.yml/badge.svg)](https://github.com/ricky-stone/SwiftKey/actions/workflows/ci.yml)
 [![Platforms](https://img.shields.io/badge/platforms-iOS%20%7C%20macOS%20%7C%20iPadOS%20%7C%20watchOS%20%7C%20tvOS-blue)](https://developer.apple.com/documentation/security/keychain_services)
 [![Swift](https://img.shields.io/badge/Swift-6.1%2B-orange)](https://swift.org)
-[![License](https://img.shields.io/github/license/ricky-stone/SwiftKeyChain)](https://github.com/ricky-stone/SwiftKeyChain/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/ricky-stone/SwiftKey)](https://github.com/ricky-stone/SwiftKey/blob/main/LICENSE)
 
 Simple, beginner-friendly Keychain wrapper for Apple platforms.
 
 [Install](#installation) | [Basic Usage](#basic-usage) | [DoCatch-usage](#docatch-usage) | [Sync-fail-safe](#sync-fail-safe)
 
-## Why SwiftKeyChain?
+## Why SwiftKey?
 
 - Easy API for add/get/update/delete.
 - Works with primitive values and `Codable` models.
@@ -24,23 +24,23 @@ Simple, beginner-friendly Keychain wrapper for Apple platforms.
 
 1. Open `File > Add Packages...`
 2. Paste:
-   `https://github.com/ricky-stone/SwiftKeyChain.git`
-3. Select `Up to Next Major` from `0.0.1`.
+   `https://github.com/ricky-stone/SwiftKey.git`
+3. Select `Up to Next Major` from `1.0.0`.
 
 ### Package.swift
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/ricky-stone/SwiftKeyChain.git", from: "0.0.1")
+    .package(url: "https://github.com/ricky-stone/SwiftKey.git", from: "1.0.0")
 ]
 ```
 
 ## Basic Usage
 
 ```swift
-import SwiftKeyChain
+import SwiftKey
 
-let kc = SwiftKeyChain()
+let kc = SwiftKey()
 
 try? kc.AddKey("KeyName", "Value")
 let value = try? kc.getKey("KeyName")
@@ -78,10 +78,10 @@ let savedUser = try? kc.getModel("User", as: User.self)
 ### Add and read safely
 
 ```swift
-import SwiftKeyChain
+import SwiftKey
 
 func saveAndRead() {
-    let kc = SwiftKeyChain()
+    let kc = SwiftKey()
 
     do {
         try kc.AddKey("Token", "abc123")
@@ -97,7 +97,7 @@ func saveAndRead() {
 
 ```swift
 func manageKeys() {
-    let kc = SwiftKeyChain()
+    let kc = SwiftKey()
 
     do {
         try kc.AddKey("Plan", "free")
@@ -118,7 +118,7 @@ func manageKeys() {
 
 ## Typed Reads (Different "Casting" Styles)
 
-SwiftKeyChain decodes by type. You can retrieve values in multiple beginner-friendly ways.
+SwiftKey decodes by type. You can retrieve values in multiple beginner-friendly ways.
 
 ### 1) Explicit type with `as:`
 
@@ -169,7 +169,7 @@ let blob = try kc.getData(forKey: "Blob")
 ## Sync Fail-Safe
 
 ```swift
-let kc = SwiftKeyChain(
+let kc = SwiftKey(
     service: "com.example.myapp",
     accessGroup: nil,
     synchronizable: true,
@@ -178,7 +178,7 @@ let kc = SwiftKeyChain(
 ```
 
 What happens when `synchronizable` is `true`:
-- SwiftKeyChain first tries iCloud-synced Keychain operations.
+- SwiftKey first tries iCloud-synced Keychain operations.
 - If sync is unavailable (for example entitlement or keychain availability issues), it falls back to local non-sync storage automatically, so data can still be stored.
 
 Useful helpers:
@@ -196,7 +196,7 @@ Important notes:
 ## Configuration
 
 ```swift
-let kc = SwiftKeyChain(
+let kc = SwiftKey(
     service: "com.mycompany.myapp",
     accessGroup: nil,
     synchronizable: true,

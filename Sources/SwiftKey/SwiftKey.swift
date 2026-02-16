@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-public enum SwiftKeyChainError: Error, LocalizedError, Equatable {
+public enum SwiftKeyError: Error, LocalizedError, Equatable {
     case invalidKey
     case duplicateKey
     case keyNotFound
@@ -53,14 +53,14 @@ public enum KeychainAccessibility: Sendable {
     }
 }
 
-public struct SwiftKeyChainConfiguration: Sendable {
+public struct SwiftKeyConfiguration: Sendable {
     public var service: String
     public var accessGroup: String?
     public var synchronizable: Bool
     public var accessibility: KeychainAccessibility
 
     public init(
-        service: String = SwiftKeyChain.defaultService,
+        service: String = SwiftKey.defaultService,
         accessGroup: String? = nil,
         synchronizable: Bool = true,
         accessibility: KeychainAccessibility = .afterFirstUnlock
@@ -72,19 +72,19 @@ public struct SwiftKeyChainConfiguration: Sendable {
     }
 }
 
-public final class SwiftKeyChain {
+public final class SwiftKey {
     private static let syncFallbackStatuses: Set<OSStatus> = [
         errSecMissingEntitlement,
         errSecNotAvailable,
     ]
 
     public static var defaultService: String {
-        Bundle.main.bundleIdentifier ?? "SwiftKeyChain.DefaultService"
+        Bundle.main.bundleIdentifier ?? "SwiftKey.DefaultService"
     }
 
-    public let configuration: SwiftKeyChainConfiguration
+    public let configuration: SwiftKeyConfiguration
 
-    public init(configuration: SwiftKeyChainConfiguration = .init()) {
+    public init(configuration: SwiftKeyConfiguration = .init()) {
         self.configuration = configuration
     }
 
@@ -95,7 +95,7 @@ public final class SwiftKeyChain {
         accessibility: KeychainAccessibility = .afterFirstUnlock
     ) {
         self.init(
-            configuration: SwiftKeyChainConfiguration(
+            configuration: SwiftKeyConfiguration(
                 service: service ?? Self.defaultService,
                 accessGroup: accessGroup,
                 synchronizable: synchronizable,
@@ -193,12 +193,12 @@ public final class SwiftKeyChain {
             return false
         }
 
-        let probeKey = "__swiftkeychain_sync_probe__"
+        let probeKey = "__swiftkey_sync_probe__"
 
         do {
             _ = try readRawData(forKey: probeKey, synchronizable: true)
             return true
-        } catch let error as SwiftKeyChainError {
+        } catch let error as SwiftKeyError {
             return !shouldFallbackToLocalStorage(error)
         } catch {
             return false
@@ -256,7 +256,7 @@ public final class SwiftKeyChain {
 
         do {
             combined.formUnion(try keysForQuery(synchronizable: true))
-        } catch let error as SwiftKeyChainError where shouldFallbackToLocalStorage(error) {
+        } catch let error as SwiftKeyError where shouldFallbackToLocalStorage(error) {
             // Sync is not available; continue with local keychain only.
         }
 
@@ -292,7 +292,7 @@ public final class SwiftKeyChain {
 
         do {
             try writeRawData(data, forKey: key, mode: mode, synchronizable: true)
-        } catch let error as SwiftKeyChainError where shouldFallbackToLocalStorage(error) {
+        } catch let error as SwiftKeyError where shouldFallbackToLocalStorage(error) {
             try writeRawData(data, forKey: key, mode: mode, synchronizable: false)
         }
     }
@@ -307,7 +307,7 @@ public final class SwiftKeyChain {
         case .upsert:
             do {
                 try addRawData(data, forKey: key, synchronizable: synchronizable)
-            } catch SwiftKeyChainError.duplicateKey {
+            } catch SwiftKeyError.duplicateKey {
                 try updateRawData(data, forKey: key, synchronizable: synchronizable)
             }
         case .updateOnly:
@@ -351,7 +351,7 @@ public final class SwiftKeyChain {
             if let syncData = try readRawData(forKey: key, synchronizable: true) {
                 return syncData
             }
-        } catch let error as SwiftKeyChainError where !shouldFallbackToLocalStorage(error) {
+        } catch let error as SwiftKeyError where !shouldFallbackToLocalStorage(error) {
             throw error
         }
 
@@ -369,7 +369,7 @@ public final class SwiftKeyChain {
         switch status {
         case errSecSuccess:
             guard let data = result as? Data else {
-                throw SwiftKeyChainError.unexpectedData
+                throw SwiftKeyError.unexpectedData
             }
             return data
         case errSecItemNotFound:
@@ -388,7 +388,7 @@ public final class SwiftKeyChain {
 
         do {
             didDelete = try removeRawData(forKey: key, synchronizable: true) || didDelete
-        } catch let error as SwiftKeyChainError where !shouldFallbackToLocalStorage(error) {
+        } catch let error as SwiftKeyError where !shouldFallbackToLocalStorage(error) {
             throw error
         }
 
@@ -414,7 +414,7 @@ public final class SwiftKeyChain {
         do {
             return try JSONEncoder().encode(value)
         } catch {
-            throw SwiftKeyChainError.encodingFailed
+            throw SwiftKeyError.encodingFailed
         }
     }
 
@@ -422,14 +422,14 @@ public final class SwiftKeyChain {
         do {
             return try JSONDecoder().decode(type, from: data)
         } catch {
-            throw SwiftKeyChainError.decodingFailed
+            throw SwiftKeyError.decodingFailed
         }
     }
 
     private func validateKey(_ key: String) throws -> String {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw SwiftKeyChainError.invalidKey
+            throw SwiftKeyError.invalidKey
         }
         return trimmed
     }
@@ -479,17 +479,17 @@ public final class SwiftKeyChain {
             return [key]
         }
 
-        throw SwiftKeyChainError.unexpectedData
+        throw SwiftKeyError.unexpectedData
     }
 
-    private func shouldFallbackToLocalStorage(_ error: SwiftKeyChainError) -> Bool {
+    private func shouldFallbackToLocalStorage(_ error: SwiftKeyError) -> Bool {
         guard case let .unhandledStatus(status) = error else {
             return false
         }
         return Self.syncFallbackStatuses.contains(status)
     }
 
-    private func statusToError(_ status: OSStatus) -> SwiftKeyChainError {
+    private func statusToError(_ status: OSStatus) -> SwiftKeyError {
         switch status {
         case errSecDuplicateItem:
             return .duplicateKey

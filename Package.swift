@@ -3,7 +3,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "SwiftKeyChain",
+    name: "SwiftKey",
     platforms: [
         .iOS(.v13),
         .macOS(.v10_15),
@@ -13,17 +13,17 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "SwiftKeyChain",
-            targets: ["SwiftKeyChain"]
+            name: "SwiftKey",
+            targets: ["SwiftKey"]
         ),
     ],
     targets: [
         .target(
-            name: "SwiftKeyChain"
+            name: "SwiftKey"
         ),
         .testTarget(
-            name: "SwiftKeyChainTests",
-            dependencies: ["SwiftKeyChain"]
+            name: "SwiftKeyTests",
+            dependencies: ["SwiftKey"]
         ),
     ]
 )

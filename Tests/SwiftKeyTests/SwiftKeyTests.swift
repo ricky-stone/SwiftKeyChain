@@ -1,16 +1,16 @@
 import Foundation
 import Testing
-@testable import SwiftKeyChain
+@testable import SwiftKey
 
 private struct User: Codable, Equatable {
     let name: String
     let age: Int
 }
 
-struct SwiftKeyChainTests {
-    private func makeKeychain() -> SwiftKeyChain {
-        SwiftKeyChain(
-            service: "SwiftKeyChain.Tests.\(UUID().uuidString)",
+struct SwiftKeyTests {
+    private func makeKeychain() -> SwiftKey {
+        SwiftKey(
+            service: "SwiftKey.Tests.\(UUID().uuidString)",
             synchronizable: false
         )
     }
@@ -77,10 +77,10 @@ struct SwiftKeyChainTests {
         let kc = makeKeychain()
         defer { try? kc.removeAllKeys() }
 
-        var receivedError: SwiftKeyChainError?
+        var receivedError: SwiftKeyError?
         do {
             try kc.updateKey("missing", "value")
-        } catch let error as SwiftKeyChainError {
+        } catch let error as SwiftKeyError {
             receivedError = error
         }
 
@@ -129,8 +129,8 @@ struct SwiftKeyChainTests {
 
     @Test("Sync check is false when sync is not requested")
     func syncCheckIsFalseWhenSyncDisabled() {
-        let kc = SwiftKeyChain(
-            service: "SwiftKeyChain.Tests.\(UUID().uuidString)",
+        let kc = SwiftKey(
+            service: "SwiftKey.Tests.\(UUID().uuidString)",
             synchronizable: false
         )
 
