@@ -6,60 +6,68 @@
 [![Swift](https://img.shields.io/badge/Swift-6.1%2B-orange)](https://swift.org)
 [![License](https://img.shields.io/github/license/ricky-stone/SwiftKey)](https://github.com/ricky-stone/SwiftKey/blob/main/LICENSE)
 
-Simple, beginner-friendly Keychain wrapper for Apple platforms.
+Beginner-friendly Keychain library for Apple platforms.
 
-[Install](#installation) | [Basic Usage](#basic-usage) | [DoCatch-usage](#docatch-usage) | [Sync-fail-safe](#sync-fail-safe)
+## 30-Second Start
 
-## Why SwiftKey?
+```swift
+import SwiftKey
 
-- Easy API for add/get/update/delete.
-- Works with primitive values and `Codable` models.
-- Optional iCloud Keychain sync (`synchronizable`) with automatic local fallback.
-- Supports custom `service` and optional `accessGroup`.
-- Can list keys and clear keys.
+let key = SwiftKey.Beginner()
+
+key.setString("username", "Ricky")
+let username = key.getString("username", default: "Guest")
+print(username)
+
+if let error = key.lastErrorMessage {
+    print("SwiftKey error:", error)
+}
+```
+
+This path is non-throwing and easiest for beginners.
 
 ## Installation
 
-### Xcode (Swift Package Manager)
+### Xcode (SPM)
 
 1. Open `File > Add Packages...`
-2. Paste:
-   `https://github.com/ricky-stone/SwiftKey.git`
-3. Select `Up to Next Major` from `1.0.0`.
+2. Use: `https://github.com/ricky-stone/SwiftKey.git`
+3. Select `Up to Next Major` from `1.1.0`
 
 ### Package.swift
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/ricky-stone/SwiftKey.git", from: "1.0.0")
+    .package(url: "https://github.com/ricky-stone/SwiftKey.git", from: "1.1.0")
 ]
 ```
 
-## Basic Usage
+## Choose Your API Style
+
+- `SwiftKey.Beginner`: no `try/catch`, returns defaults and tracks `lastErrorMessage`.
+- `SwiftKey`: `throws` API for full control.
+- `SwiftKeyStore` + `Result` helpers: good for app service layers.
+- `async` wrappers: same behavior in async contexts.
+
+## Beginner API (No Throws)
 
 ```swift
 import SwiftKey
 
-let kc = SwiftKey()
+let key = SwiftKey.Beginner()
 
-try? kc.AddKey("KeyName", "Value")
-let value = try? kc.getKey("KeyName")
-print(value ?? "not found")
+key.setString("token", "abc123")
+key.setInt("launchCount", 1)
+key.setBool("isPro", true)
+key.setDouble("taxRate", 0.2)
+
+let token = key.getString("token", default: "")
+let launchCount = key.getInt("launchCount", default: 0)
+let isPro = key.getBool("isPro", default: false)
+let taxRate = key.getDouble("taxRate", default: 0)
 ```
 
-### Store primitives
-
-```swift
-try? kc.AddKey("launchCount", 42)
-try? kc.AddKey("isPremium", true)
-try? kc.AddKey("pi", 3.14159)
-
-let launchCount = try? kc.getInt("launchCount")
-let isPremium = try? kc.getBool("isPremium")
-let pi = try? kc.getDouble("pi")
-```
-
-### Store a model
+### Beginner model storage
 
 ```swift
 struct User: Codable {
@@ -67,109 +75,85 @@ struct User: Codable {
     let age: Int
 }
 
+let key = SwiftKey.Beginner()
 let user = User(name: "Ricky", age: 29)
-try? kc.AddKey("User", user)
 
-let savedUser = try? kc.getModel("User", as: User.self)
+key.setModel("user", user)
+let storedUser = key.getModel("user", as: User.self)
 ```
 
-## Do/Catch Usage
+### Beginner error handling
 
-### Add and read safely
+```swift
+let key = SwiftKey.Beginner()
+_ = key.setString("   ", "bad")
+
+if let message = key.lastErrorMessage {
+    print("Last error:", message)
+}
+```
+
+## Core API (Throws)
 
 ```swift
 import SwiftKey
 
-func saveAndRead() {
-    let kc = SwiftKey()
+let key = SwiftKey()
 
-    do {
-        try kc.AddKey("Token", "abc123")
-        let token = try kc.getKey("Token")
-        print("Token:", token ?? "missing")
-    } catch {
-        print("Keychain error:", error.localizedDescription)
-    }
-}
+try key.addKey("username", "Ricky")
+let username = try key.getKey("username", as: String.self)
+
+try key.updateKey("username", "Ricky Stone")
+let removed = try key.removeKey("username")
+print("Removed:", removed)
 ```
 
-### Update, delete, list, clear
+### Plain aliases
+
+These are available if you prefer simpler names.
 
 ```swift
-func manageKeys() {
-    let kc = SwiftKey()
-
-    do {
-        try kc.AddKey("Plan", "free")
-        try kc.updateKey("Plan", "pro")
-
-        let all = try kc.allKeys()
-        print("All keys:", all)
-
-        let removed = try kc.deleteKey("Plan")
-        print("Removed Plan:", removed)
-
-        try kc.removeAllKeys()
-    } catch {
-        print("Keychain error:", error.localizedDescription)
-    }
-}
+try key.set("username", "Ricky")
+let value: String? = try key.get("username")
+let exists = try key.contains("username")
+let removed = try key.remove("username")
+try key.clear()
 ```
 
-## Typed Reads (Different "Casting" Styles)
-
-SwiftKey decodes by type. You can retrieve values in multiple beginner-friendly ways.
-
-### 1) Explicit type with `as:`
+## Typed Keys (`Key<Value>`)
 
 ```swift
-let count = try kc.getKey("Count", as: Int.self)
-let user = try kc.getKey("User", as: User.self)
+let userKey = SwiftKey.Key<User>("profile.user")
+
+try key.set(userKey, User(name: "Ricky", age: 29))
+let user = try key.get(userKey)
 ```
 
-### 2) Model helper
+Typed keys reduce string typo mistakes in app code.
+
+## Namespaces
+
+Use namespaces to group keys.
 
 ```swift
-let user = try kc.getModel("User", as: User.self)
+let auth = key.namespace("auth")
+
+try auth.set("token", "abc123")
+let token = try auth.get("token", as: String.self)
+let keys = try auth.keys()   // ["token"]
 ```
 
-### 3) Type inference from variable
+You can also build namespaced typed keys.
 
 ```swift
-let count: Int? = try kc.getKey("Count")
-let user: User? = try kc.getKey("User")
-```
-
-### 4) Default fallback values
-
-```swift
-let username = try kc.getKey("username", "Guest")
-let retryCount = try kc.getInt("retryCount", default: 3)
-let shouldOnboard = try kc.getBool("shouldOnboard", default: true)
-let taxRate = try kc.getDouble("taxRate", default: 0.2)
-
-// Generic fallback also works for Codable models:
-let guestUser = User(name: "Guest", age: 0)
-let user = try kc.getKey("User", default: guestUser, as: User.self)
-```
-
-Fallback support:
-- Primitive helpers: `String`, `Int`, `Bool`, `Double`
-- Generic fallback: any `Codable` type (including your own models)
-
-## Raw Data
-
-```swift
-let bytes = Data([0xDE, 0xAD, 0xBE, 0xEF])
-
-try kc.setData(bytes, forKey: "Blob")
-let blob = try kc.getData(forKey: "Blob")
+let namespacedUserKey = auth.key("user", as: User.self)
+try key.set(namespacedUserKey, User(name: "Ricky", age: 29))
 ```
 
 ## Sync Fail-Safe
 
 ```swift
-let kc = SwiftKey(
+let key = SwiftKey(
     service: "com.example.myapp",
     accessGroup: nil,
     synchronizable: true,
@@ -177,51 +161,89 @@ let kc = SwiftKey(
 )
 ```
 
-What happens when `synchronizable` is `true`:
-- SwiftKey first tries iCloud-synced Keychain operations.
-- If sync is unavailable (for example entitlement or keychain availability issues), it falls back to local non-sync storage automatically, so data can still be stored.
+When `synchronizable` is `true`:
+- SwiftKey tries iCloud-synced Keychain first.
+- If sync fails due availability/entitlement issues, SwiftKey falls back to local non-sync storage.
 
-Useful helpers:
-
-```swift
-let wantsSync = kc.isSynchronizableRequested
-let canUseSyncNow = kc.canUseSynchronizableStorage() // best-effort runtime check
-```
-
-Important notes:
-- Apple does not expose a simple public API that directly tells you whether the user has iCloud Keychain toggled on.
-- `canUseSynchronizableStorage()` is a best-effort operational check from your app context.
-- Access groups require proper entitlements/provisioning.
-
-## Configuration
+Helpers:
 
 ```swift
-let kc = SwiftKey(
-    service: "com.mycompany.myapp",
-    accessGroup: nil,
-    synchronizable: true,
-    accessibility: .afterFirstUnlock
-)
+let syncRequested = key.isSynchronizableRequested
+let syncAvailable = key.canUseSynchronizableStorage()
 ```
 
-## API Overview
+## Diagnose and Debug Logging
 
-- `AddKey(_:_: )` / `addKey(_:_: )`
-- `updateKey(_:_: )`
-- `getKey(_:)`
-- `getKey(_:default:as:)`
-- `getModel(_:as:)`
-- `getInt(_:)`, `getInt(_:default:)`
-- `getBool(_:)`, `getBool(_:default:)`
-- `getDouble(_:)`, `getDouble(_:default:)`
-- `getData(forKey:)`
-- `containsKey(_:)`
-- `deleteKey(_:)` / `removeKey(_:)`
-- `allKeys()`
-- `removeAllKeys()`
-- `removeAllAvailableKeys()`
-- `isSynchronizableRequested`
-- `canUseSynchronizableStorage()`
+### Diagnose configuration
+
+```swift
+let report = key.diagnose()
+print(report.notes.joined(separator: "\n"))
+```
+
+### Optional debug logging hook
+
+```swift
+let key = SwiftKey(debugLogHandler: { entry in
+    print("[\(entry.level.rawValue)] \(entry.operation): \(entry.message)")
+})
+```
+
+## Result-Based API
+
+```swift
+let result = key.setResult("token", "abc123")
+
+switch result {
+case .success:
+    print("saved")
+case .failure(let error):
+    print(error.localizedDescription)
+}
+```
+
+Also available:
+- `getResult`
+- `removeResult`
+- `clearResult`
+- `keysResult`
+
+## Async Wrappers
+
+```swift
+try await key.setAsync("token", "abc123")
+let token: String? = try await key.getAsync("token", as: String.self)
+let removed = try await key.removeAsync("token")
+```
+
+## Migration Helpers
+
+```swift
+try key.addKey("token", "abc123")
+try key.migrateKey(from: "token", to: "auth.token")
+
+try key.addKey("user.old", User(name: "Ricky", age: 29))
+try key.migrateModel(from: "user.old", to: "user.current", as: User.self)
+```
+
+## In-Memory Store for Unit Tests
+
+`InMemorySwiftKeyStore` is useful for deterministic tests without touching device keychain.
+
+```swift
+let store: SwiftKeyStore = InMemorySwiftKeyStore()
+try store.set("username", "Ricky")
+let username = try store.get("username", as: String.self)
+```
+
+## Error Glossary (Common)
+
+- `invalidKey`: key is empty or whitespace.
+- `duplicateKey`: target key exists when overwrite is not allowed.
+- `keyNotFound`: requested key does not exist.
+- `encodingFailed`: `Codable` value could not encode.
+- `decodingFailed`: stored data does not match requested type.
+- `unhandledStatus(code)`: underlying Keychain status from Security framework.
 
 ## Testing
 
@@ -231,10 +253,6 @@ swift test
 
 ## License
 
-MIT License.
+MIT License
 
-Copyright (c) 2026 Ricky Stone.
-
-## Author
-
-Created by Ricky Stone.
+Copyright (c) 2026 Ricky Stone

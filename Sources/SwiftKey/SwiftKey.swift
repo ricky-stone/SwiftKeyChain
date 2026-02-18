@@ -83,16 +83,22 @@ public final class SwiftKey {
     }
 
     public let configuration: SwiftKeyConfiguration
+    public var debugLogHandler: SwiftKeyLogHandler?
 
-    public init(configuration: SwiftKeyConfiguration = .init()) {
+    public init(
+        configuration: SwiftKeyConfiguration = .init(),
+        debugLogHandler: SwiftKeyLogHandler? = nil
+    ) {
         self.configuration = configuration
+        self.debugLogHandler = debugLogHandler
     }
 
     public convenience init(
         service: String? = nil,
         accessGroup: String? = nil,
         synchronizable: Bool = true,
-        accessibility: KeychainAccessibility = .afterFirstUnlock
+        accessibility: KeychainAccessibility = .afterFirstUnlock,
+        debugLogHandler: SwiftKeyLogHandler? = nil
     ) {
         self.init(
             configuration: SwiftKeyConfiguration(
@@ -100,7 +106,8 @@ public final class SwiftKey {
                 accessGroup: accessGroup,
                 synchronizable: synchronizable,
                 accessibility: accessibility
-            )
+            ),
+            debugLogHandler: debugLogHandler
         )
     }
 
@@ -109,7 +116,19 @@ public final class SwiftKey {
     }
 
     public func addKey<T: Codable>(_ key: String, _ value: T) throws {
-        try setValue(value, forKey: key, mode: .upsert)
+        do {
+            try setValue(value, forKey: key, mode: .upsert)
+            log(.debug, operation: "addKey", key: key, message: "Stored value.")
+        } catch let error as SwiftKeyError {
+            log(
+                .error,
+                operation: "addKey",
+                key: key,
+                message: error.localizedDescription,
+                status: status(from: error)
+            )
+            throw error
+        }
     }
 
     public func addKey(_ key: String, _ value: Data) throws {
@@ -117,7 +136,19 @@ public final class SwiftKey {
     }
 
     public func updateKey<T: Codable>(_ key: String, _ value: T) throws {
-        try setValue(value, forKey: key, mode: .updateOnly)
+        do {
+            try setValue(value, forKey: key, mode: .updateOnly)
+            log(.debug, operation: "updateKey", key: key, message: "Updated value.")
+        } catch let error as SwiftKeyError {
+            log(
+                .error,
+                operation: "updateKey",
+                key: key,
+                message: error.localizedDescription,
+                status: status(from: error)
+            )
+            throw error
+        }
     }
 
     public func updateKey(_ key: String, _ value: Data) throws {
@@ -125,7 +156,19 @@ public final class SwiftKey {
     }
 
     public func setData(_ data: Data, forKey key: String) throws {
-        try setRawData(data, forKey: key, mode: .upsert)
+        do {
+            try setRawData(data, forKey: key, mode: .upsert)
+            log(.debug, operation: "setData", key: key, message: "Stored raw data.")
+        } catch let error as SwiftKeyError {
+            log(
+                .error,
+                operation: "setData",
+                key: key,
+                message: error.localizedDescription,
+                status: status(from: error)
+            )
+            throw error
+        }
     }
 
     public func getKey<T: Codable>(_ key: String, as type: T.Type = T.self) throws -> T? {
@@ -206,8 +249,26 @@ public final class SwiftKey {
     }
 
     public func getData(forKey key: String) throws -> Data? {
-        let validatedKey = try validateKey(key)
-        return try readDataWithFallback(forKey: validatedKey)
+        do {
+            let validatedKey = try validateKey(key)
+            let data = try readDataWithFallback(forKey: validatedKey)
+            log(
+                .debug,
+                operation: "getData",
+                key: key,
+                message: data == nil ? "Value not found." : "Value loaded."
+            )
+            return data
+        } catch let error as SwiftKeyError {
+            log(
+                .error,
+                operation: "getData",
+                key: key,
+                message: error.localizedDescription,
+                status: status(from: error)
+            )
+            throw error
+        }
     }
 
     public func containsKey(_ key: String) throws -> Bool {
@@ -221,8 +282,26 @@ public final class SwiftKey {
 
     @discardableResult
     public func removeKey(_ key: String) throws -> Bool {
-        let validatedKey = try validateKey(key)
-        return try removeDataWithFallback(forKey: validatedKey)
+        do {
+            let validatedKey = try validateKey(key)
+            let didRemove = try removeDataWithFallback(forKey: validatedKey)
+            log(
+                .debug,
+                operation: "removeKey",
+                key: key,
+                message: didRemove ? "Removed key." : "Key did not exist."
+            )
+            return didRemove
+        } catch let error as SwiftKeyError {
+            log(
+                .error,
+                operation: "removeKey",
+                key: key,
+                message: error.localizedDescription,
+                status: status(from: error)
+            )
+            throw error
+        }
     }
 
     public func removeAllKeys() throws {
@@ -230,6 +309,7 @@ public final class SwiftKey {
         for key in keys {
             _ = try removeKey(key)
         }
+        log(.info, operation: "removeAllKeys", message: "Cleared \(keys.count) keys.")
     }
 
     public func removeAllAvailableKeys() throws {
@@ -249,7 +329,9 @@ public final class SwiftKey {
 
     public func allKeys() throws -> [String] {
         if !configuration.synchronizable {
-            return try keysForQuery(synchronizable: false)
+            let found = try keysForQuery(synchronizable: false)
+            log(.debug, operation: "allKeys", message: "Loaded \(found.count) keys.")
+            return found
         }
 
         var combined = Set<String>()
@@ -258,10 +340,18 @@ public final class SwiftKey {
             combined.formUnion(try keysForQuery(synchronizable: true))
         } catch let error as SwiftKeyError where shouldFallbackToLocalStorage(error) {
             // Sync is not available; continue with local keychain only.
+            log(
+                .warning,
+                operation: "allKeys",
+                message: "Sync unavailable. Using local keys.",
+                status: status(from: error)
+            )
         }
 
         combined.formUnion(try keysForQuery(synchronizable: false))
-        return Array(combined).sorted()
+        let found = Array(combined).sorted()
+        log(.debug, operation: "allKeys", message: "Loaded \(found.count) keys.")
+        return found
     }
 
     private enum WriteMode {
@@ -293,6 +383,13 @@ public final class SwiftKey {
         do {
             try writeRawData(data, forKey: key, mode: mode, synchronizable: true)
         } catch let error as SwiftKeyError where shouldFallbackToLocalStorage(error) {
+            log(
+                .warning,
+                operation: "writeDataWithFallback",
+                key: key,
+                message: "Sync write failed. Falling back to local write.",
+                status: status(from: error)
+            )
             try writeRawData(data, forKey: key, mode: mode, synchronizable: false)
         }
     }
@@ -353,6 +450,14 @@ public final class SwiftKey {
             }
         } catch let error as SwiftKeyError where !shouldFallbackToLocalStorage(error) {
             throw error
+        } catch let error as SwiftKeyError {
+            log(
+                .warning,
+                operation: "readDataWithFallback",
+                key: key,
+                message: "Sync read failed. Falling back to local read.",
+                status: status(from: error)
+            )
         }
 
         return try readRawData(forKey: key, synchronizable: false)
@@ -390,6 +495,14 @@ public final class SwiftKey {
             didDelete = try removeRawData(forKey: key, synchronizable: true) || didDelete
         } catch let error as SwiftKeyError where !shouldFallbackToLocalStorage(error) {
             throw error
+        } catch let error as SwiftKeyError {
+            log(
+                .warning,
+                operation: "removeDataWithFallback",
+                key: key,
+                message: "Sync delete failed. Falling back to local delete.",
+                status: status(from: error)
+            )
         }
 
         didDelete = try removeRawData(forKey: key, synchronizable: false) || didDelete
@@ -487,6 +600,36 @@ public final class SwiftKey {
             return false
         }
         return Self.syncFallbackStatuses.contains(status)
+    }
+
+    private func status(from error: SwiftKeyError) -> OSStatus? {
+        guard case let .unhandledStatus(status) = error else {
+            return nil
+        }
+        return status
+    }
+
+    private func log(
+        _ level: SwiftKeyLogLevel,
+        operation: String,
+        key: String? = nil,
+        message: String,
+        status: OSStatus? = nil
+    ) {
+        guard let debugLogHandler else {
+            return
+        }
+
+        debugLogHandler(
+            SwiftKeyLogEntry(
+                timestamp: Date(),
+                level: level,
+                operation: operation,
+                key: key,
+                message: message,
+                status: status
+            )
+        )
     }
 
     private func statusToError(_ status: OSStatus) -> SwiftKeyError {
